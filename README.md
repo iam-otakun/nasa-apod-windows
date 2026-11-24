@@ -86,6 +86,10 @@ produces `NasaApod.exe`. `NasaApod.exe --selftest` runs one fetch cycle headless
 
 ## Changelog / 更新日志
 
+### v1.0.3 — 2026-11-24
+
+- Menu layout aligned with BingWallpaper: the tray menu's last group is now **Settings... / Check for Updates... / About... / Quit**, with the functional items (Archive submenu, Open Archive Folder, Open APOD Website, Launch at Login) in the group above. The new **Settings...** opens the archive settings form (seeded with the current folder) with a launch-at-login checkbox; the Archive submenu stays for quick changes. / 菜单分组与 BingWallpaper 对齐：托盘菜单最后一组固定为 **设置… / 检查更新… / 关于… / 退出**，功能项（归档子菜单、打开归档文件夹、打开 APOD 网站、开机自启）归到上面一组。新增的 **设置…** 打开归档设置窗（预填当前目录），内含开机自启勾选；归档子菜单保留作快捷更改。
+
 ### v1.0.2 — 2026-11-24
 
 - Fixed the first-run Archive Settings dialog showing the macOS-style default `~/Pictures/NASA-Apod`. It now shows the real Windows default (the Pictures folder + NASA-Apod, as an absolute path), the folder is created as soon as the app runs, and a config saved by an older version in the tilde form is rewritten to the absolute path on startup. / 修复首次运行的归档设置对话框里默认路径是 macOS 格式 `~/Pictures/NASA-Apod` 的问题：现在显示真正的 Windows 默认路径（图片文件夹下的 NASA-Apod，绝对路径），文件夹在程序运行时即建立；旧版本以波浪线形式存下的配置会在启动时自动改写为绝对路径。

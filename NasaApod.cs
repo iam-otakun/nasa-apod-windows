@@ -42,8 +42,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NasaApod")]
 [assembly: AssemblyProduct("NASA APOD for Windows")]
-[assembly: AssemblyVersion("1.0.2.0")]
-[assembly: AssemblyFileVersion("1.0.2.0")]
+[assembly: AssemblyVersion("1.0.3.0")]
+[assembly: AssemblyFileVersion("1.0.3.0")]
 
 namespace NasaApod
 {
@@ -300,6 +300,16 @@ namespace NasaApod
         public static string MOpenSite { get { return T("打开 APOD 网站", "Open APOD Website"); } }
         public static string MOpenFolder { get { return T("打开归档文件夹", "Open Archive Folder"); } }
         public static string MLogin { get { return T("开机自启", "Launch at Login"); } }
+        public static string MSettings { get { return T("设置…", "Settings..."); } }
+        public static string SettingsMsg { get { return T("归档设置", "Archive Settings"); } }
+        public static string SettingsBody
+        {
+            get
+            {
+                return T("每天的原图会归档到下面的文件夹：可以直接改，也可以点「选择文件夹…」挑选；清空则不归档。",
+                         "Each day's original picture is archived to the folder below. Edit it, or click \"Choose Folder...\" to pick one; clear it to disable archiving.");
+            }
+        }
         public static string MUpdate { get { return T("检查更新…", "Check for Updates..."); } }
         public static string MQuit { get { return T("退出", "Quit"); } }
         public static string MAbout { get { return T("关于…", "About…"); } }
@@ -768,27 +778,33 @@ namespace NasaApod
     class SetupForm : Form
     {
         private TextBox box;
+        private CheckBox loginBox;
 
         public string PathText { get { return box.Text.Trim(); } }
+        public bool LaunchChecked { get { return loginBox != null && loginBox.Checked; } }
 
-        public SetupForm()
+        // firstRun: the one-time welcome (no startup checkbox, Cancel
+        // means "use the default"). Otherwise this is the Settings
+        // dialog: seeded with the current folder, plus the launch-at-
+        // login checkbox, and Cancel simply discards changes.
+        public SetupForm(string initialPath, bool firstRun)
         {
             Text = S.SetupTitle;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(520, 218);
+            ClientSize = new Size(520, firstRun ? 218 : 256);
 
             var msg = new Label();
-            msg.Text = S.FirstMsg;
+            msg.Text = firstRun ? S.FirstMsg : S.SettingsMsg;
             msg.Location = new Point(14, 12);
             msg.Size = new Size(492, 20);
             msg.Font = new Font(Font, FontStyle.Bold);
             Controls.Add(msg);
 
             var body = new Label();
-            body.Text = S.FirstBody;
+            body.Text = firstRun ? S.FirstBody : S.SettingsBody;
             body.Location = new Point(14, 36);
             body.Size = new Size(492, 58);
             Controls.Add(body);
@@ -796,12 +812,24 @@ namespace NasaApod
             box = new TextBox();
             box.Location = new Point(14, 102);
             box.Size = new Size(492, 23);
-            box.Text = Settings.DefaultArchiveDir;
+            box.Text = initialPath;
             Controls.Add(box);
+
+            int btnY = 140;
+            if (!firstRun)
+            {
+                loginBox = new CheckBox();
+                loginBox.Text = S.MLogin;
+                loginBox.Location = new Point(14, 140);
+                loginBox.Size = new Size(300, 24);
+                loginBox.Checked = Settings.LaunchAtLogin;
+                Controls.Add(loginBox);
+                btnY = 178;
+            }
 
             var choose = new Button();
             choose.Text = S.ChooseBtn;
-            choose.Location = new Point(14, 140);
+            choose.Location = new Point(14, btnY);
             choose.Size = new Size(140, 30);
             choose.Click += delegate
             {
@@ -815,14 +843,14 @@ namespace NasaApod
 
             var ok = new Button();
             ok.Text = S.Ok;
-            ok.Location = new Point(336, 140);
+            ok.Location = new Point(336, btnY);
             ok.Size = new Size(80, 30);
             ok.DialogResult = DialogResult.OK;
             Controls.Add(ok);
 
             var cancel = new Button();
             cancel.Text = S.Cancel;
-            cancel.Location = new Point(426, 140);
+            cancel.Location = new Point(426, btnY);
             cancel.Size = new Size(80, 30);
             cancel.DialogResult = DialogResult.Cancel;
             Controls.Add(cancel);
@@ -1152,8 +1180,6 @@ namespace NasaApod
             siteItem.Click += delegate { Process.Start(Core.PageUrl); };
             menu.Items.Add(siteItem);
 
-            menu.Items.Add(new ToolStripSeparator());
-
             loginItem = new ToolStripMenuItem(S.MLogin);
             loginItem.Checked = Settings.LaunchAtLogin;
             loginItem.Click += delegate
@@ -1163,6 +1189,12 @@ namespace NasaApod
                 loginItem.Checked = Settings.LaunchAtLogin;
             };
             menu.Items.Add(loginItem);
+
+            menu.Items.Add(new ToolStripSeparator());
+
+            var settingsItem = new ToolStripMenuItem(S.MSettings);
+            settingsItem.Click += delegate { ShowSettings(); };
+            menu.Items.Add(settingsItem);
 
             updateItem = new ToolStripMenuItem(S.MUpdate);
             updateItem.Click += async delegate { await CheckForUpdates(true); };
@@ -1185,7 +1217,7 @@ namespace NasaApod
             // First run: offer the archive setup once, like the plugin.
             if (Settings.ConfValue() == null)
             {
-                using (var form = new SetupForm())
+                using (var form = new SetupForm(Settings.DefaultArchiveDir, true))
                 {
                     if (form.ShowDialog() == DialogResult.OK) Settings.SaveConf(Settings.ExpandHome(form.PathText));
                     else Settings.SaveConf(Settings.DefaultArchiveDir);
@@ -1361,6 +1393,24 @@ namespace NasaApod
                 if (form.ShowDialog() == DialogResult.OK)
                 {
                     Settings.SaveConf(form.PathText);
+                    RefreshMenuState();
+                    var ignored = SilentFetch();
+                }
+            }
+        }
+
+        // The Settings... item in the menu's last group (the same
+        // final group as our other apps): the archive folder plus
+        // launch-at-login, in the first-run form's Settings mode.
+        private void ShowSettings()
+        {
+            string cur = Settings.EffectiveDir() ?? "";
+            using (var form = new SetupForm(cur, false))
+            {
+                if (form.ShowDialog() == DialogResult.OK)
+                {
+                    Settings.SaveConf(Settings.ExpandHome(form.PathText));
+                    Settings.LaunchAtLogin = form.LaunchChecked;
                     RefreshMenuState();
                     var ignored = SilentFetch();
                 }
