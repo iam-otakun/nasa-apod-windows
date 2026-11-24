@@ -42,8 +42,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NasaApod")]
 [assembly: AssemblyProduct("NASA APOD for Windows")]
-[assembly: AssemblyVersion("1.0.1.0")]
-[assembly: AssemblyFileVersion("1.0.1.0")]
+[assembly: AssemblyVersion("1.0.2.0")]
+[assembly: AssemblyFileVersion("1.0.2.0")]
 
 namespace NasaApod
 {
@@ -102,7 +102,7 @@ namespace NasaApod
             return ExpandHome(v);
         }
 
-        private static string ExpandHome(string p)
+        public static string ExpandHome(string p)
         {
             if (p == "~") return HomeDir;
             if (p.StartsWith("~/", StringComparison.Ordinal) || p.StartsWith("~\\", StringComparison.Ordinal))
@@ -796,7 +796,7 @@ namespace NasaApod
             box = new TextBox();
             box.Location = new Point(14, 102);
             box.Size = new Size(492, 23);
-            box.Text = "~/Pictures/NASA-Apod";
+            box.Text = Settings.DefaultArchiveDir;
             Controls.Add(box);
 
             var choose = new Button();
@@ -1187,9 +1187,24 @@ namespace NasaApod
             {
                 using (var form = new SetupForm())
                 {
-                    if (form.ShowDialog() == DialogResult.OK) Settings.SaveConf(form.PathText);
-                    else Settings.SaveConf("~/Pictures/NASA-Apod");
+                    if (form.ShowDialog() == DialogResult.OK) Settings.SaveConf(Settings.ExpandHome(form.PathText));
+                    else Settings.SaveConf(Settings.DefaultArchiveDir);
                 }
+            }
+            else if (Settings.ConfValue() == "~/Pictures/NASA-Apod" || Settings.ConfValue() == "~/Pictures\\NASA-Apod")
+            {
+                // Heal the pre-1.0.2 default, which was saved in the
+                // macOS plugin's tilde form instead of a Windows path.
+                Settings.SaveConf(Settings.DefaultArchiveDir);
+            }
+
+            // The archive folder exists from the moment the app runs,
+            // not only after the first picture lands in it.
+            string archiveDir = Settings.EffectiveDir();
+            if (archiveDir != null)
+            {
+                try { Directory.CreateDirectory(archiveDir); }
+                catch (Exception ex) { Core.Log("Create archive dir failed: " + ex.Message); }
             }
 
             RefreshMenuState();

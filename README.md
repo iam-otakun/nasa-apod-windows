@@ -86,6 +86,10 @@ produces `NasaApod.exe`. `NasaApod.exe --selftest` runs one fetch cycle headless
 
 ## Changelog / 更新日志
 
+### v1.0.2 — 2026-11-24
+
+- Fixed the first-run Archive Settings dialog showing the macOS-style default `~/Pictures/NASA-Apod`. It now shows the real Windows default (the Pictures folder + NASA-Apod, as an absolute path), the folder is created as soon as the app runs, and a config saved by an older version in the tilde form is rewritten to the absolute path on startup. / 修复首次运行的归档设置对话框里默认路径是 macOS 格式 `~/Pictures/NASA-Apod` 的问题：现在显示真正的 Windows 默认路径（图片文件夹下的 NASA-Apod，绝对路径），文件夹在程序运行时即建立；旧版本以波浪线形式存下的配置会在启动时自动改写为绝对路径。
+
 ### v1.0.1 — 2026-11-24
 
 - Added the unified About dialog (name, version, Idea: Otakun, Coding: Dash, and a link labelled "GitHub Repository") to the tray menu — the same About as our other Windows and macOS programs. Release packages are now named with the platform (NasaApod-Windows-x.y.z.zip). / 托盘菜单新增统一规格的 About 对话框（程序名、版本、Idea: Otakun、Coding: Dash、一条写着「GitHub Repository」的链接）——与我们其它 Windows、macOS 程序同一规格。发布包文件名从此带平台标识（NasaApod-Windows-x.y.z.zip）。
