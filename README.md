@@ -36,7 +36,7 @@ NASA 改版后的 APOD 页面有三处会把人带偏——与 macOS 插件里�
 
 ## What it does / 功能
 
-- **Left-click the tray icon**: a popup shows today's picture (pure-black side bars trimmed for display only — the archive always keeps the original bytes), with its title and date. Click the title to reveal the archived file in Explorer. / **左键点托盘图标**：弹窗显示今天的图片（纯黑边只在显示时裁掉——归档永远存原始字节），带标题与日期。点标题在资源管理器中定位归档文件。
+- **Left-click the tray icon**: a popup shows today's picture (pure-black side bars trimmed for display only — the archive always keeps the original bytes), with its title and date. Click the title to reveal the archived file in Explorer. The preview can also pop up when the pointer hovers over the icon — on by default, and **Settings...** has the checkbox to turn it off. / **左键点托盘图标**：弹窗显示今天的图片（纯黑边只在显示时裁掉——归档永远存原始字节），带标题与日期。点标题在资源管理器中定位归档文件。预览还能在鼠标悬停于图标上时弹出——默认开启，可在**设置…**里取消勾选关掉。
 - **The menu mirrors the plugin** / **菜单与插件版一致**：
   - The first line is the picture's title (click it to reveal the file). / 第一行是图片标题（点它定位文件）。
   - **Refresh** answers before it fetches: it compares the remembered date with NASA's latest and shows **"Up to date!"** or **"Update successfully"** (the note dismisses itself after 3 seconds). / **刷新**先回话再抓图：把记住的日期与 NASA 最新一期比对，显示 **"Up to date!"** 或 **"Update successfully"**（提示 3 秒后自动消失）。
@@ -85,6 +85,10 @@ produces `NasaApod.exe`. `NasaApod.exe --selftest` runs one fetch cycle headless
 产出 `NasaApod.exe`。`NasaApod.exe --selftest` 无头跑一次抓取周期，结果写到 `%AppData%\NasaApod\selftest.txt`。
 
 ## Changelog / 更新日志
+
+### v1.0.5 — 2026-11-24
+
+- The preview now also pops up when the pointer hovers over the tray icon (a short dwell, so sweeping across the tray does not trigger it; once dismissed it stays down until the pointer leaves and returns). It is on by default and can be switched off in **Settings...** — "Show preview when hovering over the tray icon". Clicking the icon still toggles the preview as before. / 鼠标悬停在托盘图标上时也会弹出预览（带一点停留判断，划过托盘不会误触；关掉后要等指针离开再回来才会再弹）。默认开启，可在 **设置…** 里取消「鼠标悬停在图标上时弹出预览」。单击图标切换预览的行为不变。
 
 ### v1.0.4 — 2026-11-24
 

@@ -42,8 +42,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NasaApod")]
 [assembly: AssemblyProduct("NASA APOD for Windows")]
-[assembly: AssemblyVersion("1.0.4.0")]
-[assembly: AssemblyFileVersion("1.0.4.0")]
+[assembly: AssemblyVersion("1.0.5.0")]
+[assembly: AssemblyFileVersion("1.0.5.0")]
 
 namespace NasaApod
 {
@@ -200,6 +200,14 @@ namespace NasaApod
             set { SetString("LastAppCheck", value.ToString("o", CultureInfo.InvariantCulture)); }
         }
 
+        // Hovering over the tray icon pops the preview (Settings...
+        // can turn it off). Default on.
+        public static bool HoverPreview
+        {
+            get { return GetString("HoverPreview", "1") != "0"; }
+            set { SetString("HoverPreview", value ? "1" : "0"); }
+        }
+
         public static DateTime LastFetch
         {
             get
@@ -295,6 +303,7 @@ namespace NasaApod
         public static string MOpenFolder { get { return T("打开归档文件夹", "Open Archive Folder"); } }
         public static string MLogin { get { return T("开机自启", "Launch at Login"); } }
         public static string MSettings { get { return T("设置…", "Settings..."); } }
+        public static string SHover { get { return T("鼠标悬停在图标上时弹出预览", "Show preview when hovering over the tray icon"); } }
         public static string SettingsMsg { get { return T("归档设置", "Archive Settings"); } }
         public static string SettingsBody
         {
@@ -773,9 +782,11 @@ namespace NasaApod
     {
         private TextBox box;
         private CheckBox loginBox;
+        private CheckBox hoverBox;
 
         public string PathText { get { return box.Text.Trim(); } }
         public bool LaunchChecked { get { return loginBox != null && loginBox.Checked; } }
+        public bool HoverChecked { get { return hoverBox != null && hoverBox.Checked; } }
 
         // firstRun: the one-time welcome (no startup checkbox, Cancel
         // means "use the default"). Otherwise this is the Settings
@@ -788,7 +799,7 @@ namespace NasaApod
             MaximizeBox = false;
             MinimizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(520, firstRun ? 218 : 256);
+            ClientSize = new Size(520, firstRun ? 218 : 284);
 
             var msg = new Label();
             msg.Text = firstRun ? S.FirstMsg : S.SettingsMsg;
@@ -825,7 +836,14 @@ namespace NasaApod
                 turnOff.Size = new Size(176, 26);
                 turnOff.Click += delegate { box.Text = ""; };
                 Controls.Add(turnOff);
-                btnY = 178;
+
+                hoverBox = new CheckBox();
+                hoverBox.Text = S.SHover;
+                hoverBox.Location = new Point(14, 168);
+                hoverBox.Size = new Size(400, 24);
+                hoverBox.Checked = Settings.HoverPreview;
+                Controls.Add(hoverBox);
+                btnY = 206;
             }
 
             var choose = new Button();
@@ -1066,6 +1084,11 @@ namespace NasaApod
         private NotifyIcon tray;
         private ToolStripMenuItem titleItem;
         private ToolStripMenuItem updateItem;
+        private System.Windows.Forms.Timer hoverTimer;
+        private System.Windows.Forms.Timer hoverWatchdog;
+        private DateTime lastTrayMove = DateTime.MinValue;
+        private bool hoverPending;
+        private bool hoverShown;
         private PreviewForm preview;
         private FetchResult current;
         private ReleaseInfo pendingUpdate;
@@ -1084,6 +1107,20 @@ namespace NasaApod
             {
                 if (e.Button == MouseButtons.Left) TogglePreview();
             };
+            tray.MouseMove += delegate { NoteTrayMove(); };
+            hoverTimer = new System.Windows.Forms.Timer();
+            hoverTimer.Tick += delegate { HoverPop(); };
+            hoverWatchdog = new System.Windows.Forms.Timer();
+            hoverWatchdog.Interval = 250;
+            hoverWatchdog.Tick += delegate
+            {
+                // Re-arm the hover pop only after the pointer has
+                // left the icon for a while (no move events).
+                if (hoverShown && preview != null && !preview.Visible
+                    && (DateTime.Now - lastTrayMove).TotalMilliseconds > 900)
+                    hoverShown = false;
+            };
+            hoverWatchdog.Start();
             tray.BalloonTipClicked += delegate
             {
                 if (pendingUpdate != null)
@@ -1186,6 +1223,8 @@ namespace NasaApod
         protected override void ExitThreadCore()
         {
             if (timer != null) timer.Stop();
+            if (hoverTimer != null) hoverTimer.Stop();
+            if (hoverWatchdog != null) hoverWatchdog.Stop();
             if (preview != null) preview.Dispose();
             if (tray != null) { tray.Visible = false; tray.Dispose(); }
             base.ExitThreadCore();
@@ -1260,6 +1299,37 @@ namespace NasaApod
             }
         }
 
+        // Hover pop: a tray icon raises no enter/leave events, only
+        // MouseMove, so a fresh approach (first move after a quiet
+        // gap) starts a short dwell; if the preview is still down
+        // when it elapses, it pops. Once shown or dismissed it will
+        // not pop again until the pointer has left and returned
+        // (the watchdog re-arms it), so sweeping across the tray or
+        // wiggling on the icon never makes it flicker.
+        private void NoteTrayMove()
+        {
+            DateTime now = DateTime.Now;
+            bool fresh = (now - lastTrayMove).TotalMilliseconds > 900;
+            lastTrayMove = now;
+            if (!fresh || hoverShown || hoverPending) return;
+            if (!Settings.HoverPreview || preview == null || preview.Visible) return;
+            hoverPending = true;
+            hoverTimer.Interval = 450;
+            hoverTimer.Start();
+        }
+
+        private void HoverPop()
+        {
+            hoverTimer.Stop();
+            hoverPending = false;
+            if (!Settings.HoverPreview || preview == null || preview.Visible) return;
+            if (current != null && current.DisplayImage != null)
+            {
+                preview.ShowFor(current);
+                hoverShown = true;
+            }
+        }
+
         private void TogglePreview()
         {
             if (preview == null) return;
@@ -1297,6 +1367,7 @@ namespace NasaApod
                 {
                     Settings.SaveConf(Settings.ExpandHome(form.PathText));
                     Settings.LaunchAtLogin = form.LaunchChecked;
+                    Settings.HoverPreview = form.HoverChecked;
                     RefreshMenuState();
                     var ignored = SilentFetch();
                 }
