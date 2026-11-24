@@ -86,6 +86,10 @@ produces `NasaApod.exe`. `NasaApod.exe --selftest` runs one fetch cycle headless
 
 ## Changelog / 更新日志
 
+### v1.0.1 — 2026-11-24
+
+- Added the unified About dialog (name, version, Idea: Otakun, Coding: Dash, and a link labelled "GitHub Repository") to the tray menu — the same About as our other Windows and macOS programs. Release packages are now named with the platform (NasaApod-Windows-x.y.z.zip). / 托盘菜单新增统一规格的 About 对话框（程序名、版本、Idea: Otakun、Coding: Dash、一条写着「GitHub Repository」的链接）——与我们其它 Windows、macOS 程序同一规格。发布包文件名从此带平台标识（NasaApod-Windows-x.y.z.zip）。
+
 ### v1.0.0 — 2026-11-24
 
 - First release: the macOS SwiftBar plugin's feature set as a Windows tray app — daily picture popup by the tray, full-size originals archived as `YYYY-MM-DD Title.jpg`, Refresh that answers back, the Archive submenu, bilingual UI, launch at login, and self-update from GitHub Releases. / 首个版本：macOS SwiftBar 插件的全部功能移植为 Windows 托盘程序——托盘旁的每日图片弹窗、全尺寸原图按 `YYYY-MM-DD 标题.jpg` 归档、会回话的刷新、归档子菜单、双语界面、开机自启、GitHub 发布在线更新。

@@ -42,8 +42,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NasaApod")]
 [assembly: AssemblyProduct("NASA APOD for Windows")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.0")]
 
 namespace NasaApod
 {
@@ -302,6 +302,8 @@ namespace NasaApod
         public static string MLogin { get { return T("开机自启", "Launch at Login"); } }
         public static string MUpdate { get { return T("检查更新…", "Check for Updates..."); } }
         public static string MQuit { get { return T("退出", "Quit"); } }
+        public static string MAbout { get { return T("关于…", "About…"); } }
+        public static string MClose { get { return T("关闭", "Close"); } }
         public static string NoImageYet { get { return T("（还没有图片）", "(no image yet)"); } }
     }
 
@@ -1007,6 +1009,64 @@ namespace NasaApod
     // plus the Windows-sibling extras (launch at login, self-update).
     // ------------------------------------------------------------------
 
+    // ---------------- about dialog ----------------
+    // The house About, shared by all three Windows tray apps:
+    // name, version, Idea: Otakun, Coding: Dash, and a link labelled
+    // "GitHub Repository" (never the raw URL as the link text).
+    class AboutForm : Form
+    {
+        public AboutForm()
+        {
+            Text = S.MAbout.Replace("…", "");
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false; MinimizeBox = false;
+            StartPosition = FormStartPosition.CenterScreen;
+            ClientSize = new Size(340, 196);
+            Font = new Font("Microsoft YaHei UI", 9f);
+
+            var title = new Label();
+            title.Text = "NASA APOD for Windows";
+            title.Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold);
+            title.Location = new Point(16, 14);
+            title.Size = new Size(308, 24);
+            Controls.Add(title);
+
+            var ver = new Label();
+            ver.Text = "Version " + Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
+            ver.Location = new Point(16, 46);
+            ver.Size = new Size(308, 18);
+            Controls.Add(ver);
+
+            var idea = new Label();
+            idea.Text = "Idea: Otakun";
+            idea.Location = new Point(16, 78);
+            idea.Size = new Size(308, 18);
+            Controls.Add(idea);
+
+            var coding = new Label();
+            coding.Text = "Coding: Dash";
+            coding.Location = new Point(16, 100);
+            coding.Size = new Size(308, 18);
+            Controls.Add(coding);
+
+            var link = new LinkLabel();
+            link.Text = "GitHub Repository";
+            link.Location = new Point(16, 128);
+            link.Size = new Size(308, 18);
+            link.LinkClicked += delegate { Process.Start("https://github.com/iam-otakun/nasa-apod-windows"); };
+            Controls.Add(link);
+
+            var btn = new Button();
+            btn.Text = S.MClose;
+            btn.Location = new Point(244, 158);
+            btn.Size = new Size(80, 28);
+            btn.DialogResult = DialogResult.OK;
+            Controls.Add(btn);
+            AcceptButton = btn;
+            CancelButton = btn;
+        }
+    }
+
     class TrayApp : ApplicationContext
     {
         private NotifyIcon tray;
@@ -1107,6 +1167,13 @@ namespace NasaApod
             updateItem = new ToolStripMenuItem(S.MUpdate);
             updateItem.Click += async delegate { await CheckForUpdates(true); };
             menu.Items.Add(updateItem);
+
+            var aboutItem = new ToolStripMenuItem(S.MAbout);
+            aboutItem.Click += delegate
+            {
+                using (var f = new AboutForm()) f.ShowDialog();
+            };
+            menu.Items.Add(aboutItem);
 
             var quitItem = new ToolStripMenuItem(S.MQuit);
             quitItem.Click += delegate { ExitThread(); };
