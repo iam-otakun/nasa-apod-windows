@@ -86,6 +86,10 @@ produces `NasaApod.exe`. `NasaApod.exe --selftest` runs one fetch cycle headless
 
 ## Changelog / 更新日志
 
+### v1.0.4 — 2026-11-24
+
+- The Archive submenu and the Open Archive Folder item are gone. Everything archive-related now lives in **Settings...**: the folder path (type it, or Choose Folder...), **Restore Default Folder** and **Turn Off Archiving** buttons, and the **Launch at Login** checkbox — the menu's own Launch at Login item is gone too. Clicking the picture's title in the menu opens the archive folder with the current picture selected (as it already did), so nothing is lost. The menu is now just: title, Refresh, Open APOD Website — then the house final group Settings... / Check for Updates... / About... / Quit. (Restore Default now writes the default path into the config instead of deleting the config, which also stops the first-run dialog from reappearing on the next start.) / 「归档」子菜单与「打开归档文件夹」菜单项取消。归档相关的一切都进 **设置…**：目录路径（直接输入或「选择文件夹…」）、**恢复默认目录** 与 **关闭归档** 按钮、**开机自启** 勾选——菜单里的开机自启项也一并取消。点菜单里的图片标题会打开归档文件夹并选中当前图片（本来就是这个行为），什么都没少。菜单现在只剩：标题、刷新、打开 APOD 网站——然后是统一的最后一组 设置… / 检查更新… / 关于… / 退出。（恢复默认改为把默认路径写进配置，不再删配置——顺带修掉旧行为会让首次运行对话框下次启动再冒出来的毛病。）
+
 ### v1.0.3 — 2026-11-24
 
 - Menu layout aligned with BingWallpaper: the tray menu's last group is now **Settings... / Check for Updates... / About... / Quit**, with the functional items (Archive submenu, Open Archive Folder, Open APOD Website, Launch at Login) in the group above. The new **Settings...** opens the archive settings form (seeded with the current folder) with a launch-at-login checkbox; the Archive submenu stays for quick changes. / 菜单分组与 BingWallpaper 对齐：托盘菜单最后一组固定为 **设置… / 检查更新… / 关于… / 退出**，功能项（归档子菜单、打开归档文件夹、打开 APOD 网站、开机自启）归到上面一组。新增的 **设置…** 打开归档设置窗（预填当前目录），内含开机自启勾选；归档子菜单保留作快捷更改。

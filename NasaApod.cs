@@ -42,8 +42,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NasaApod")]
 [assembly: AssemblyProduct("NASA APOD for Windows")]
-[assembly: AssemblyVersion("1.0.3.0")]
-[assembly: AssemblyFileVersion("1.0.3.0")]
+[assembly: AssemblyVersion("1.0.4.0")]
+[assembly: AssemblyFileVersion("1.0.4.0")]
 
 namespace NasaApod
 {
@@ -114,12 +114,6 @@ namespace NasaApod
         {
             try { File.WriteAllText(ConfPath, "ARCHIVE_DIR=" + value + "\n"); }
             catch (Exception ex) { Core.Log("SaveConf failed: " + ex.Message); }
-        }
-
-        public static void DeleteConf()
-        {
-            try { if (File.Exists(ConfPath)) File.Delete(ConfPath); }
-            catch { }
         }
 
         public static string StateDate()
@@ -824,84 +818,56 @@ namespace NasaApod
                 loginBox.Size = new Size(300, 24);
                 loginBox.Checked = Settings.LaunchAtLogin;
                 Controls.Add(loginBox);
+
+                var turnOff = new Button();
+                turnOff.Text = S.MDisable;
+                turnOff.Location = new Point(330, 138);
+                turnOff.Size = new Size(176, 26);
+                turnOff.Click += delegate { box.Text = ""; };
+                Controls.Add(turnOff);
                 btnY = 178;
             }
 
             var choose = new Button();
             choose.Text = S.ChooseBtn;
             choose.Location = new Point(14, btnY);
-            choose.Size = new Size(140, 30);
+            choose.Size = new Size(firstRun ? 140 : 126, 30);
             choose.Click += delegate
             {
                 using (var dlg = new FolderBrowserDialog())
                 {
                     dlg.Description = S.ChoosePrompt;
+                    if (Directory.Exists(box.Text)) dlg.SelectedPath = box.Text;
                     if (dlg.ShowDialog(this) == DialogResult.OK) box.Text = dlg.SelectedPath;
                 }
             };
             Controls.Add(choose);
 
+            if (!firstRun)
+            {
+                var defBtn = new Button();
+                defBtn.Text = S.MDefault;
+                defBtn.Location = new Point(148, btnY);
+                defBtn.Size = new Size(164, 30);
+                defBtn.Click += delegate { box.Text = Settings.DefaultArchiveDir; };
+                Controls.Add(defBtn);
+            }
+
             var ok = new Button();
             ok.Text = S.Ok;
-            ok.Location = new Point(336, btnY);
+            ok.Location = new Point(firstRun ? 336 : 330, btnY);
             ok.Size = new Size(80, 30);
             ok.DialogResult = DialogResult.OK;
             Controls.Add(ok);
 
             var cancel = new Button();
             cancel.Text = S.Cancel;
-            cancel.Location = new Point(426, btnY);
+            cancel.Location = new Point(firstRun ? 426 : 420, btnY);
             cancel.Size = new Size(80, 30);
             cancel.DialogResult = DialogResult.Cancel;
             Controls.Add(cancel);
 
             AcceptButton = ok;
-            CancelButton = cancel;
-        }
-    }
-
-    class InputPathForm : Form
-    {
-        private TextBox box;
-
-        public string PathText { get { return box.Text.Trim(); } }
-
-        public InputPathForm(string current)
-        {
-            Text = "NASA APOD";
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(480, 128);
-
-            var msg = new Label();
-            msg.Text = S.InputMsg;
-            msg.Location = new Point(14, 12);
-            msg.Size = new Size(452, 20);
-            Controls.Add(msg);
-
-            box = new TextBox();
-            box.Location = new Point(14, 40);
-            box.Size = new Size(452, 23);
-            box.Text = current ?? "";
-            Controls.Add(box);
-
-            var save = new Button();
-            save.Text = S.Save;
-            save.Location = new Point(296, 78);
-            save.Size = new Size(80, 30);
-            save.DialogResult = DialogResult.OK;
-            Controls.Add(save);
-
-            var cancel = new Button();
-            cancel.Text = S.Cancel;
-            cancel.Location = new Point(386, 78);
-            cancel.Size = new Size(80, 30);
-            cancel.DialogResult = DialogResult.Cancel;
-            Controls.Add(cancel);
-
-            AcceptButton = save;
             CancelButton = cancel;
         }
     }
@@ -1099,9 +1065,6 @@ namespace NasaApod
     {
         private NotifyIcon tray;
         private ToolStripMenuItem titleItem;
-        private ToolStripMenuItem archiveHeadItem;
-        private ToolStripMenuItem openFolderItem;
-        private ToolStripMenuItem loginItem;
         private ToolStripMenuItem updateItem;
         private PreviewForm preview;
         private FetchResult current;
@@ -1142,53 +1105,9 @@ namespace NasaApod
             refreshItem.Click += async delegate { await ManualRefresh(); };
             menu.Items.Add(refreshItem);
 
-            menu.Items.Add(new ToolStripSeparator());
-
-            var archiveItem = new ToolStripMenuItem(S.Archive);
-            archiveHeadItem = new ToolStripMenuItem();
-            archiveHeadItem.Enabled = false;
-            archiveItem.DropDownItems.Add(archiveHeadItem);
-            archiveItem.DropDownItems.Add(new ToolStripSeparator());
-            var chooseItem = new ToolStripMenuItem(S.MChoose);
-            chooseItem.Click += delegate { ChooseArchiveDir(); };
-            archiveItem.DropDownItems.Add(chooseItem);
-            var inputItem = new ToolStripMenuItem(S.MInput);
-            inputItem.Click += delegate { InputArchiveDir(); };
-            archiveItem.DropDownItems.Add(inputItem);
-            var disableItem = new ToolStripMenuItem(S.MDisable);
-            disableItem.Click += delegate { Settings.SaveConf(""); RefreshMenuState(); };
-            archiveItem.DropDownItems.Add(disableItem);
-            var defaultItem = new ToolStripMenuItem(S.MDefault);
-            defaultItem.Click += async delegate
-            {
-                Settings.DeleteConf();
-                RefreshMenuState();
-                await SilentFetch();
-            };
-            archiveItem.DropDownItems.Add(defaultItem);
-            menu.Items.Add(archiveItem);
-
-            openFolderItem = new ToolStripMenuItem(S.MOpenFolder);
-            openFolderItem.Click += delegate
-            {
-                string dir = Settings.EffectiveDir();
-                if (dir != null && Directory.Exists(dir)) Process.Start("explorer.exe", "\"" + dir + "\"");
-            };
-            menu.Items.Add(openFolderItem);
-
             var siteItem = new ToolStripMenuItem(S.MOpenSite);
             siteItem.Click += delegate { Process.Start(Core.PageUrl); };
             menu.Items.Add(siteItem);
-
-            loginItem = new ToolStripMenuItem(S.MLogin);
-            loginItem.Checked = Settings.LaunchAtLogin;
-            loginItem.Click += delegate
-            {
-                bool on = !loginItem.Checked;
-                Settings.LaunchAtLogin = on;
-                loginItem.Checked = Settings.LaunchAtLogin;
-            };
-            menu.Items.Add(loginItem);
 
             menu.Items.Add(new ToolStripSeparator());
 
@@ -1339,9 +1258,6 @@ namespace NasaApod
                 if (trayText.Length >= 64) trayText = trayText.Substring(0, 63);
                 tray.Text = trayText;
             }
-            string dir = Settings.EffectiveDir();
-            archiveHeadItem.Text = S.Archive + S.Colon + (dir ?? S.Off);
-            openFolderItem.Enabled = dir != null;
         }
 
         private void TogglePreview()
@@ -1367,36 +1283,6 @@ namespace NasaApod
             }
             string dir = Settings.EffectiveDir();
             if (dir != null && Directory.Exists(dir)) Process.Start("explorer.exe", "\"" + dir + "\"");
-        }
-
-        private void ChooseArchiveDir()
-        {
-            using (var dlg = new FolderBrowserDialog())
-            {
-                dlg.Description = S.ChoosePrompt;
-                string cur = Settings.EffectiveDir();
-                if (cur != null && Directory.Exists(cur)) dlg.SelectedPath = cur;
-                if (dlg.ShowDialog() == DialogResult.OK)
-                {
-                    Settings.SaveConf(dlg.SelectedPath);
-                    RefreshMenuState();
-                    var ignored = SilentFetch();
-                }
-            }
-        }
-
-        private void InputArchiveDir()
-        {
-            string cur = Settings.EffectiveDir() ?? "";
-            using (var form = new InputPathForm(cur))
-            {
-                if (form.ShowDialog() == DialogResult.OK)
-                {
-                    Settings.SaveConf(form.PathText);
-                    RefreshMenuState();
-                    var ignored = SilentFetch();
-                }
-            }
         }
 
         // The Settings... item in the menu's last group (the same
