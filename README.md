@@ -30,7 +30,7 @@ NASA's redesigned APOD page misleads in three places — the same three the macO
 
 NASA 改版后的 APOD 页面有三处会把人带偏——与 macOS 插件里记的是同样的三处：
 
-1. **`og:image` is a fixed template.** Every page — even video days — points it at the same stock photo (an eagle over a flag). Never use it. The real photo hangs off the day's **image-article link**. / **`og:image` 是固定模板图**：每个页面（包括视频日）都指向同一张库存图（一只鹰与一面旗），千万别用。当天的真图挂在当天的 **image-article 链接**上。
+1. **`og:image` is a fixed template.** Every page — even video days — points it at the same stock photo (an eagle over a flag). Never use it. The real photo hangs in the **hero figure in front of the entry's title** (its link is the original file). / **`og:image` 是固定模板图**：每个页面（包括视频日）都指向同一张库存图（一只鹰与一面旗），千万别用。当天的真图挂在**条目标题前的图版块**里（它的链接就是原图）。
 2. **The main heading is the title.** The image-article slug's text describes the thumbnail ("…up-close view…"), not the picture. The title is the page's big heading (`display-48`). / **主标题才是图片标题**：image-article 链接里的文字描述的是缩略图（"……的特写"之类），不是图片本身。标题在页面的大标题里（`display-48`）。
 3. **The rendered image is not the original.** The page shows a dynamically rendered, resized JPEG; the full-size original is the same file under `content/dam/science/` instead of `dynamicimage/assets/science/`. The archive stores the original. / **页面展示图不是原图**：页面上是动态渲染的缩放 JPEG；全尺寸原图是同一文件、路径在 `content/dam/science/` 而非 `dynamicimage/assets/science/`。归档存的是原图。
 
@@ -65,10 +65,10 @@ Kept deliberately identical to the macOS plugin, so both editions can share one 
 
 - `~/.nasa-apod.conf` — one line, `ARCHIVE_DIR=<path>`. Empty value = archiving off; missing file = not set up yet. / 一行：`ARCHIVE_DIR=<路径>`。值为空 = 关闭归档；文件不存在 = 尚未设置。
 - `~/.nasa-apod.state` — the last APOD date shown. / 上次展示的 APOD 日期。
-- Archive file names: `YYYY-MM-DD <title>.jpg`, never overwritten. / 归档文件名：`YYYY-MM-DD <标题>.jpg`，从不覆盖。
+- Archive file names: `YYYY-MM-DD <title>.jpg`, never overwritten; every day also leaves a same-named `.txt` (title, date, credit, full explanation, source links), and video days archive `.mp4` under the same naming. / 归档文件名：`YYYY-MM-DD <标题>.jpg`，从不覆盖；每天另存同名 `.txt`（标题、日期、署名、说明全文、来源链接），视频日按同名规则存 `.mp4`。
 - `%AppData%\NasaApod\` — app-internal settings, the log (`NasaApod.log`) and update staging. / 程序内部设置、日志（`NasaApod.log`）与更新暂存。
 
-A video day (or an unreachable network) leaves the previous picture in place and says so in the menu. / 遇到视频日（或网络不通），保留上一张图片，并在菜单里说明。
+A video day archives the video itself (`.mp4`, capped at 100 MB — above that only the link in the day's `.txt`) and the popup shows its first frame. An unreachable network leaves the previous picture in place and says so in the menu. / 视频日会把视频本体归档（`.mp4`，上限 100 MB——超过只在当天 `.txt` 里留链接），弹窗显示视频第一帧。网络不通时保留上一张图片，并在菜单里说明。
 
 ## Build / 构建
 
@@ -85,6 +85,10 @@ produces `NasaApod.exe`. `NasaApod.exe --selftest` runs one fetch cycle headless
 产出 `NasaApod.exe`。`NasaApod.exe --selftest` 无头跑一次抓取周期，结果写到 `%AppData%\NasaApod\selftest.txt`。
 
 ## Changelog / 更新日志
+
+### v1.1.0 — 2026-11-26
+
+- **Brought up to the macOS version's architecture / 与 macOS 版架构对齐**: the parser is now the plugin v1.9.3 extraction, ported 1:1 — everything anchors on the entry's own title: the date comes from the byline beside it, the picture (or video) from the hero figure in front of it, and the credit and full explanation are extracted too. The old image-article match and any og:image fallback are gone. Every day now archives a same-named **`.txt`** (title, date, credit, full explanation, source links) next to the picture. **Video days** archive the `.mp4` itself (100 MB cap; above that, link only) and the popup shows the video's first frame (via the shell's image factory — the site offers no poster). New **Explanation...** menu item opens a window with the day's picture, title, date, credit and full explanation, paging **Previous / Next Day** through the local archive; new **Set as Wallpaper** item (picture days); the menu's title line carries a small thumbnail of the day, like the Mac menu. Windows extras are unchanged: hover preview, balloon notifications, settings, launch at login, self-update. / **解析器换成插件 v1.9.3 的提取逻辑，1:1 移植**：一切以条目自己的标题为锚——日期取标题旁的署名行，图片（或视频）取标题前的图版块，署名与说明全文一并提取；旧的 image-article 匹配与 og:image 兜底彻底删除。每天在图片之外另存同名 **`.txt`**（标题、日期、署名、说明全文、来源链接）。**视频日**归档 `.mp4` 本体（上限 100 MB，超过只留链接），弹窗显示视频第一帧（走系统 Shell 图像工厂取帧——官网不提供海报图）。菜单新增**查看说明…**：窗内大图＋标题＋日期＋署名＋说明全文，可在本地归档里**前一天 / 后一天**翻页；新增**设为壁纸**（图片日）；菜单标题行带当日小缩略图，与 Mac 菜单同款。Windows 原有 extras 不变：悬停预览、气泡通知、设置、开机自启、自更新。
 
 ### v1.0.5 — 2026-11-24
 

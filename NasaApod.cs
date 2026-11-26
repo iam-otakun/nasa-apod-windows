@@ -3,13 +3,15 @@
 // popup by the tray — and quietly archives the original picture every
 // day. It is the Windows sibling of the SwiftBar plugin
 // swiftbar-nasa-apod and mirrors it feature for feature: the day's
-// photo from the page's image-article link (NASA's og:image is a fixed
-// site template), the title from the page's main heading, the full-size
-// original archived as "YYYY-MM-DD Title.jpg", pure-black borders
-// trimmed for display only, a Refresh that answers back ("Up to date!"
-// / "Update successfully"), and an Archive submenu that owns the
-// archive folder (default Pictures\NASA-Apod, stored in
-// ~/.nasa-apod.conf — the same file format as the macOS plugin).
+// photo from the hero figure in front of the page's main heading
+// (NASA's og:image is a fixed site template and is never used), the
+// full-size original archived as "YYYY-MM-DD Title.jpg" with a
+// same-named .txt holding the credit and the full explanation, video
+// days archived as .mp4 (first frame shown in the popup), pure-black
+// borders trimmed for display only, a Refresh that answers back
+// ("Up to date!" / "Update successfully"), and an Archive submenu
+// that owns the archive folder (default Pictures\NASA-Apod, stored
+// in ~/.nasa-apod.conf — the same file format as the macOS plugin).
 //
 // Single-file C# (C# 5, .NET Framework 4.8), built with the framework's
 // csc.exe — the same recipe as our BingWallpaper and NetworkSwitch
@@ -42,8 +44,8 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("NasaApod")]
 [assembly: AssemblyProduct("NASA APOD for Windows")]
-[assembly: AssemblyVersion("1.0.5.0")]
-[assembly: AssemblyFileVersion("1.0.5.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 namespace NasaApod
 {
@@ -318,14 +320,21 @@ namespace NasaApod
         public static string MAbout { get { return T("关于…", "About…"); } }
         public static string MClose { get { return T("关闭", "Close"); } }
         public static string NoImageYet { get { return T("（还没有图片）", "(no image yet)"); } }
+        public static string MExplanation { get { return T("查看说明…", "Explanation..."); } }
+        public static string MWallpaper { get { return T("设为壁纸", "Set as Wallpaper"); } }
+        public static string MPrevDay { get { return T("◀ 前一天", "◀ Previous Day"); } }
+        public static string MNextDay { get { return T("后一天 ▶", "Next Day ▶"); } }
+        public static string MPlayVideo { get { return T("播放视频", "Play Video"); } }
+        public static string MVideoNote { get { return T("今日条目是视频", "Today's entry is a video"); } }
+        public static string WallpaperSet { get { return T("已设为壁纸", "Wallpaper set"); } }
     }
 
     // ------------------------------------------------------------------
     // Core fetch logic — a direct port of the macOS plugin's:
-    // the day's photo hangs off the page's image-article link (its
-    // slug carries the entry date); og:image is a fixed site template
-    // and is never used. The archive stores the full-size original
-    // (the content/dam twin of the rendered dynamicimage file).
+    // the day's photo hangs off the hero figure in front of the
+    // entry's title; og:image is a fixed site template and is never
+    // used. The archive stores the full-size original (the
+    // content/dam twin of the rendered dynamicimage file).
     // ------------------------------------------------------------------
 
     public class ApodInfo
@@ -334,6 +343,10 @@ namespace NasaApod
         public string Title;       // as written on the page, unescaped
         public string ImageUrl;    // rendered image for display
         public string ArchiveUrl;  // full-size original for the archive
+        public string Credit = "";
+        public string Explanation = "";
+        public bool IsVideo;
+        public string VideoUrl;
     }
 
     public class FetchResult
@@ -341,6 +354,9 @@ namespace NasaApod
         public ApodInfo Info;
         public Image DisplayImage;   // black borders trimmed, full size
         public string ArchivePath;   // where today's original lives (null = archiving off)
+        public string TxtPath;       // today's same-named .txt sidecar
+        public string VideoPath;     // today's archived .mp4 (video days)
+        public bool VideoTooLarge;   // video day, over the 100 MB cap: link only
         public string Error;         // non-null when the fetch failed
     }
 
@@ -362,10 +378,15 @@ namespace NasaApod
 
         private static HttpClient MakeClient()
         {
+            return MakeClient(60);
+        }
+
+        private static HttpClient MakeClient(int timeoutSeconds)
+        {
             var client = new HttpClient();
-            client.Timeout = TimeSpan.FromSeconds(60);
+            client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
             client.DefaultRequestHeaders.TryAddWithoutValidation(
-                "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NasaApod-Windows/1.0");
+                "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NasaApod-Windows/1.1");
             return client;
         }
 
@@ -430,29 +451,283 @@ namespace NasaApod
             { "september", 9 }, { "october", 10 }, { "november", 11 }, { "december", 12 }
         };
 
-        // Parse the APOD front page; null when there is no picture
-        // entry (a video day, or a page redesign).
-        public static ApodInfo Parse(string html)
+        // --------------------------------------------------------------
+        // Page parsing — a 1:1 port of plugin v1.9.3's extraction.
+        // Everything anchors on the entry's own title heading: the
+        // page's first image-article links and "YYYY Month DD" strings
+        // belong to the PREVIOUS entry's navigation, and og:image is
+        // the site's template image — all three have silently poisoned
+        // archives before, so none of them is consulted any more.
+        // --------------------------------------------------------------
+
+        private static readonly Regex TitleRe =
+            new Regex("display-48 margin-top-0 margin-bottom-3\">([^<]+)<");
+
+        private static bool FindTitle(string html, out string title, out int start, out int end)
         {
-            if (string.IsNullOrEmpty(html)) return null;
-            var m = Regex.Match(html,
-                "image-article/apod-(\\d{4})-([a-z]+)-(\\d{1,2})-[^\"]*\"[^>]*>\\s*<img[^>]*?src=\"([^\"]+)\"");
+            title = null; start = -1; end = -1;
+            if (string.IsNullOrEmpty(html)) return false;
+            var m = TitleRe.Match(html);
+            if (!m.Success) return false;
+            title = HttpUtility.HtmlDecode(m.Groups[1].Value).Trim();
+            start = m.Index;
+            end = m.Index + m.Length;
+            return true;
+        }
+
+        // The entry's date, from the byline near its own title
+        // ("November 25, 2026"); null when the byline is not found.
+        public static string ParseDate(string html)
+        {
+            string title; int start, end;
+            if (!FindTitle(html, out title, out start, out end)) return null;
+            int segStart = Math.Max(0, start - 4000);
+            int segLen = Math.Min(html.Length - segStart, (start - segStart) + 8000);
+            string seg = html.Substring(segStart, segLen);
+            var m = Regex.Match(seg,
+                "(January|February|March|April|May|June|July|August|September|October|November|December) (\\d{1,2}), (\\d{4})");
             if (!m.Success) return null;
             int month;
-            if (!Months.TryGetValue(m.Groups[2].Value, out month)) return null;
-            var info = new ApodInfo();
-            info.Date = string.Format(CultureInfo.InvariantCulture, "{0}-{1:00}-{2:00}",
-                m.Groups[1].Value, month, int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture));
-            string img = HttpUtility.HtmlDecode(m.Groups[4].Value);
-            if (img.StartsWith("/", StringComparison.Ordinal)) img = "https://apod.nasa.gov" + img;
-            info.ImageUrl = img;
-            string arch = Regex.Replace(img, "dynamicimage/assets/science/", "content/dam/science/");
-            int q = arch.IndexOf('?');
-            if (q >= 0) arch = arch.Substring(0, q);
-            info.ArchiveUrl = arch;
-            var tm = Regex.Match(html, "class=\"display-48 margin-top-0 margin-bottom-3\">([^<]+)<");
-            info.Title = tm.Success ? HttpUtility.HtmlDecode(tm.Groups[1].Value).Trim() : "";
-            return info;
+            if (!Months.TryGetValue(m.Groups[1].Value.ToLowerInvariant(), out month)) return null;
+            return string.Format(CultureInfo.InvariantCulture, "{0}-{1:00}-{2:00}",
+                m.Groups[3].Value, month, int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture));
+        }
+
+        public class HeroMedia
+        {
+            public string ImageUrl;
+            public string ArchiveUrl;
+            public string VideoUrl;
+        }
+
+        private static string AbsUrl(string u)
+        {
+            if (string.IsNullOrEmpty(u)) return u;
+            if (u.StartsWith("/", StringComparison.Ordinal)) return "https://www.nasa.gov" + u;
+            return u;
+        }
+
+        // The day's media hangs in the hero figure in front of the
+        // title (hds-media-inner): on image days the figure's link is
+        // the original file and its <img> the rendered one; on video
+        // days the figure holds a <video>. Only the last figure/video
+        // in the 30,000 characters before the title counts.
+        public static HeroMedia ParseHero(string html)
+        {
+            string title; int start, end;
+            if (!FindTitle(html, out title, out start, out end)) return null;
+            int winStart = Math.Max(0, start - 30000);
+            string win = html.Substring(winStart, start - winStart);
+            int fi = win.LastIndexOf("<figure class=\"hds-media-inner", StringComparison.Ordinal);
+            if (fi >= 0)
+            {
+                string seg = win.Substring(fi, Math.Min(6000, win.Length - fi));
+                var im = Regex.Match(seg, "<img[^>]+src=\"([^\"]+)\"");
+                if (im.Success)
+                {
+                    var hero = new HeroMedia();
+                    string disp = HttpUtility.HtmlDecode(im.Groups[1].Value);
+                    var am = Regex.Match(seg, "<a[^>]+href=\"([^\"]+)\"");
+                    string href = am.Success ? HttpUtility.HtmlDecode(am.Groups[1].Value) : "";
+                    string hrefNoQ = href.Split('?')[0];
+                    if (href.IndexOf("/content/dam/", StringComparison.Ordinal) >= 0
+                        || Regex.IsMatch(hrefNoQ, "\\.(jpg|jpeg|png)$", RegexOptions.IgnoreCase))
+                    {
+                        hero.ArchiveUrl = AbsUrl(href);
+                    }
+                    else
+                    {
+                        string arch = disp.Replace("dynamicimage/assets/science/", "content/dam/science/");
+                        int q = arch.IndexOf('?');
+                        if (q >= 0) arch = arch.Substring(0, q);
+                        hero.ArchiveUrl = AbsUrl(arch);
+                    }
+                    hero.ImageUrl = AbsUrl(disp);
+                    return hero;
+                }
+            }
+            int vi = win.LastIndexOf("<video", StringComparison.Ordinal);
+            if (vi >= 0)
+            {
+                string seg = win.Substring(vi, Math.Min(4000, win.Length - vi));
+                var sm = Regex.Match(seg, "<source[^>]+src=\"([^\"]+)\"");
+                if (sm.Success)
+                {
+                    var hero = new HeroMedia();
+                    hero.VideoUrl = AbsUrl(HttpUtility.HtmlDecode(sm.Groups[1].Value));
+                    return hero;
+                }
+            }
+            return null;
+        }
+
+        private static string PlainText(string frag)
+        {
+            frag = Regex.Replace(frag, "(?i)<br\\s*/?>", "\n");
+            frag = Regex.Replace(frag, "<[^>]+>", "");
+            frag = HttpUtility.HtmlDecode(frag);
+            var lines = new List<string>();
+            foreach (string ln in frag.Split('\n'))
+            {
+                string t = Regex.Replace(ln, "\\s+", " ").Trim();
+                if (t.Length > 0) lines.Add(t);
+            }
+            return string.Join("\n", lines.ToArray());
+        }
+
+        // Credit (the hds-credits block in front of the title) and the
+        // explanation (the media-detail-hero__description paragraph
+        // after the title that carries the "Explanation:" lead-in,
+        // cut at "Tomorrow's picture"). The page mixes in JSON-escaped
+        // copies, so escapes are undone before any tag work.
+        public static void ParseEntryText(string html, out string credit, out string explanation)
+        {
+            credit = "";
+            explanation = "";
+            string title; int start, end;
+            if (!FindTitle(html, out title, out start, out end)) return;
+            int preStart = Math.Max(0, start - 6000);
+            string pre = html.Substring(preStart, start - preStart);
+            int ci = pre.LastIndexOf("hds-credits", StringComparison.Ordinal);
+            if (ci >= 0)
+            {
+                string seg = pre.Substring(ci, Math.Min(3000, pre.Length - ci));
+                var cm = Regex.Match(seg, "<div>(.*?)</div>", RegexOptions.Singleline);
+                if (cm.Success) credit = PlainText(cm.Groups[1].Value);
+            }
+            int pos = end;
+            for (int i = 0; i < 6; i++)
+            {
+                int ei = html.IndexOf("media-detail-hero__description", pos, StringComparison.Ordinal);
+                if (ei < 0) break;
+                int gt = html.IndexOf('>', ei);
+                int pe = gt >= 0 ? html.IndexOf("</p>", gt, StringComparison.Ordinal) : -1;
+                if (gt >= 0 && pe > gt)
+                {
+                    string frag = html.Substring(gt + 1, pe - gt - 1);
+                    frag = frag.Replace("\\/", "/").Replace("\\'", "'")
+                        .Replace("\\n", "\n").Replace("\\t", "\t").Replace("\\\"", "\"");
+                    if (frag.IndexOf("Explanation:", StringComparison.Ordinal) >= 0)
+                    {
+                        var lead = Regex.Match(frag, "(?is)^.*?<strong>\\s*Explanation:\\s*</strong>");
+                        if (lead.Success) frag = frag.Substring(lead.Length);
+                        int cut = frag.IndexOf("Tomorrow's picture", StringComparison.Ordinal);
+                        if (cut >= 0)
+                        {
+                            frag = frag.Substring(0, cut);
+                            frag = Regex.Replace(frag, "(?i)<strong>\\s*$", "");
+                        }
+                        explanation = PlainText(frag);
+                        break;
+                    }
+                }
+                pos = ei + 10;
+            }
+        }
+
+        // APOD's day rolls over at midnight US Eastern.
+        public static string EasternToday()
+        {
+            try
+            {
+                TimeZoneInfo et = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+                return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, et)
+                    .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+            catch { return DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        }
+
+        // The same-named .txt sidecar: title, date, credit, the full
+        // explanation and the source links. Written once, never
+        // overwritten — the plugin's completeness rule (every day
+        // leaves its artefact in the archive).
+        public static string WriteEntryTxt(string dir, string date, string title,
+            string credit, string expl, string mediaLabel, string mediaUrl)
+        {
+            try
+            {
+                string name = !string.IsNullOrEmpty(title) ? date + " " + title + ".txt" : date + ".txt";
+                string path = Path.Combine(dir, name);
+                if (File.Exists(path)) return path;
+                var lines = new List<string>();
+                lines.Add(title ?? "");
+                lines.Add("Date: " + date);
+                if (!string.IsNullOrEmpty(credit)) lines.Add(credit);
+                lines.Add("");
+                lines.Add("Explanation:");
+                lines.Add(!string.IsNullOrEmpty(expl) ? expl : "(extraction failed)");
+                lines.Add("");
+                if (!string.IsNullOrEmpty(mediaUrl)) lines.Add(mediaLabel + ": " + mediaUrl);
+                lines.Add("APOD: https://apod.nasa.gov/apod/");
+                File.WriteAllText(path, string.Join("\n", lines.ToArray()) + "\n", new UTF8Encoding(false));
+                return path;
+            }
+            catch (Exception ex)
+            {
+                Log("WriteEntryTxt failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        public static async Task<long?> HeadLength(string url)
+        {
+            try
+            {
+                using (HttpClient client = MakeClient())
+                {
+                    var req = new HttpRequestMessage(HttpMethod.Head, url);
+                    HttpResponseMessage resp = await client.SendAsync(req).ConfigureAwait(false);
+                    if (resp.IsSuccessStatusCode && resp.Content.Headers.ContentLength.HasValue)
+                        return resp.Content.Headers.ContentLength.Value;
+                }
+            }
+            catch (Exception ex) { Log("HEAD failed (" + url + "): " + Describe(ex)); }
+            return null;
+        }
+
+        public class BinaryResult
+        {
+            public byte[] Data;
+            public bool TooLarge;
+        }
+
+        // Download with a size cap (the video rule): the length header
+        // is checked before a single byte is read, and the body again
+        // after, in case the header lied or was absent.
+        public static async Task<BinaryResult> DownloadCapped(string url, long maxBytes)
+        {
+            try
+            {
+                return await DownloadCappedOnce(url, maxBytes).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log("DownloadCapped first attempt failed (" + url + "): " + Describe(ex));
+            }
+            await Task.Delay(1500).ConfigureAwait(false);
+            return await DownloadCappedOnce(url, maxBytes).ConfigureAwait(false);
+        }
+
+        private static async Task<BinaryResult> DownloadCappedOnce(string url, long maxBytes)
+        {
+            var r = new BinaryResult();
+            using (HttpClient client = MakeClient(300))
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, url);
+                HttpResponseMessage resp = await client.SendAsync(req,
+                    HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+                resp.EnsureSuccessStatusCode();
+                if (resp.Content.Headers.ContentLength.HasValue
+                    && resp.Content.Headers.ContentLength.Value > maxBytes)
+                {
+                    r.TooLarge = true;
+                    return r;
+                }
+                byte[] data = await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                if (data.Length > maxBytes) { r.TooLarge = true; return r; }
+                r.Data = data;
+                return r;
+            }
         }
 
         // Just the latest entry's date, for the Refresh comparison.
@@ -461,8 +736,7 @@ namespace NasaApod
             try
             {
                 string html = await FetchText(PageUrl).ConfigureAwait(false);
-                ApodInfo info = Parse(html);
-                return info == null ? null : info.Date;
+                return ParseDate(html);
             }
             catch (Exception ex)
             {
@@ -484,23 +758,17 @@ namespace NasaApod
             return sb.ToString().Trim();
         }
 
-        // One full cycle: fetch the page, download the picture, archive
-        // the original, remember the date. Mirrors the plugin's run.
+        // One full cycle: fetch the page, extract the day (plugin
+        // 1.9.3's rules), archive the artefact plus its .txt, remember
+        // the date. Video days archive the .mp4 itself (100 MB cap)
+        // and show its first frame.
         public static async Task<FetchResult> FetchLatest()
         {
             var result = new FetchResult();
-            ApodInfo info;
-            byte[] displayBytes;
+            string html;
             try
             {
-                string html = await FetchText(PageUrl).ConfigureAwait(false);
-                info = Parse(html);
-                if (info == null)
-                {
-                    result.Error = S.Error;
-                    return result;
-                }
-                displayBytes = await DownloadBinary(info.ImageUrl).ConfigureAwait(false);
+                html = await FetchText(PageUrl).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -508,20 +776,65 @@ namespace NasaApod
                 result.Error = S.Error;
                 return result;
             }
-
+            string title; int tStart, tEnd;
+            if (!FindTitle(html, out title, out tStart, out tEnd))
+            {
+                Log("Title anchor not found on the APOD page");
+                result.Error = S.Error;
+                return result;
+            }
+            var info = new ApodInfo();
+            info.Title = title;
+            info.Date = ParseDate(html) ?? EasternToday();
+            string credit, expl;
+            ParseEntryText(html, out credit, out expl);
+            info.Credit = credit;
+            info.Explanation = expl;
             result.Info = info;
+
+            HeroMedia hero = ParseHero(html);
+            if (hero == null)
+            {
+                Log("Hero extraction failed");
+                result.Error = S.Error;
+                return result;
+            }
+
             Settings.SaveStateDate(info.Date);
             Settings.LastFetch = DateTime.Now;
-
-            // Archive the full-size original (never overwrite).
             string dir = Settings.EffectiveDir();
+            string safeTitle = SanitizeFileName(info.Title);
+
+            if (!string.IsNullOrEmpty(hero.VideoUrl))
+            {
+                info.IsVideo = true;
+                info.VideoUrl = hero.VideoUrl;
+                await ArchiveVideoDay(result, dir, safeTitle).ConfigureAwait(false);
+                return result;
+            }
+
+            info.ImageUrl = hero.ImageUrl;
+            info.ArchiveUrl = hero.ArchiveUrl;
+            byte[] displayBytes;
+            try
+            {
+                displayBytes = await DownloadBinary(info.ImageUrl).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Log("Display download failed: " + Describe(ex));
+                result.Error = S.Error;
+                return result;
+            }
+
+            // Archive the full-size original (never overwrite) and
+            // the day's .txt sidecar.
             if (dir != null)
             {
                 try
                 {
                     Directory.CreateDirectory(dir);
-                    string title = SanitizeFileName(info.Title);
-                    string name = title.Length > 0 ? info.Date + " " + title + ".jpg" : info.Date + ".jpg";
+                    string name = safeTitle.Length > 0 ? info.Date + " " + safeTitle + ".jpg" : info.Date + ".jpg";
                     string path = Path.Combine(dir, name);
                     result.ArchivePath = path;
                     if (!File.Exists(path))
@@ -534,6 +847,9 @@ namespace NasaApod
                         }
                         File.WriteAllBytes(path, data ?? displayBytes);
                     }
+                    result.TxtPath = WriteEntryTxt(dir, info.Date, safeTitle, info.Credit,
+                        info.Explanation, "Image",
+                        !string.IsNullOrEmpty(info.ArchiveUrl) ? info.ArchiveUrl : info.ImageUrl);
                 }
                 catch (Exception ex)
                 {
@@ -556,6 +872,68 @@ namespace NasaApod
                 result.Error = S.Error;
             }
             return result;
+        }
+
+        // A video day: the .txt always lands; the .mp4 itself too,
+        // unless it exceeds the 100 MB cap (then the .txt's link is
+        // the artefact). The popup shows the video's first frame,
+        // taken by the shell's image factory — no poster exists on
+        // the site for these videos.
+        private static async Task ArchiveVideoDay(FetchResult result, string dir, string safeTitle)
+        {
+            ApodInfo info = result.Info;
+            if (dir == null) return;
+            try
+            {
+                Directory.CreateDirectory(dir);
+                result.TxtPath = WriteEntryTxt(dir, info.Date, safeTitle, info.Credit,
+                    info.Explanation, "Video", info.VideoUrl);
+                string vname = safeTitle.Length > 0 ? info.Date + " " + safeTitle + ".mp4" : info.Date + ".mp4";
+                string vpath = Path.Combine(dir, vname);
+                if (File.Exists(vpath))
+                {
+                    result.VideoPath = vpath;
+                }
+                else
+                {
+                    long? size = await HeadLength(info.VideoUrl).ConfigureAwait(false);
+                    if (size.HasValue && size.Value > 100L * 1024 * 1024)
+                    {
+                        result.VideoTooLarge = true;
+                        Log("Video too large (" + size.Value + " bytes), link only");
+                    }
+                    else
+                    {
+                        BinaryResult dl = await DownloadCapped(info.VideoUrl, 100L * 1024 * 1024)
+                            .ConfigureAwait(false);
+                        if (dl.TooLarge)
+                        {
+                            result.VideoTooLarge = true;
+                            Log("Video too large (download), link only");
+                        }
+                        else if (dl.Data != null)
+                        {
+                            File.WriteAllBytes(vpath, dl.Data);
+                            result.VideoPath = vpath;
+                            Log("Archived video " + vname + " (" + dl.Data.Length + " bytes)");
+                        }
+                    }
+                }
+                result.ArchivePath = result.VideoPath ?? result.TxtPath;
+                if (result.VideoPath != null)
+                {
+                    Image frame = ShellThumb.GetImage(result.VideoPath, 720);
+                    if (frame != null)
+                    {
+                        result.DisplayImage = TrimBlackBorders(new Bitmap(frame));
+                        frame.Dispose();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("Video archive failed: " + ex.Message);
+            }
         }
 
         // Trim rows/columns that are entirely (sampled) pure black —
@@ -1015,6 +1393,332 @@ namespace NasaApod
     }
 
     // ------------------------------------------------------------------
+    // Shell thumbnails: a video's first frame (or any file's preview)
+    // through the same image factory Explorer uses. Null when
+    // Windows has no thumbnail for the file.
+    // ------------------------------------------------------------------
+
+    static class ShellThumb
+    {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SIZE
+        {
+            public int cx;
+            public int cy;
+            public SIZE(int x, int y) { cx = x; cy = y; }
+        }
+
+        [ComImport, Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b"),
+         InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IShellItemImageFactory
+        {
+            void GetImage(SIZE size, int flags, out IntPtr phbm);
+        }
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+        private static extern void SHCreateItemFromParsingName(string pszPath, IntPtr pbc,
+            ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out IShellItemImageFactory ppv);
+
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteObject(IntPtr hObject);
+
+        public static Image GetImage(string path, int maxDim)
+        {
+            IntPtr hbm = IntPtr.Zero;
+            try
+            {
+                Guid iid = new Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b");
+                IShellItemImageFactory factory;
+                SHCreateItemFromParsingName(path, IntPtr.Zero, ref iid, out factory);
+                factory.GetImage(new SIZE(maxDim, maxDim), 0x1 /* SIIGBF_BIGGERSIZEOK */, out hbm);
+                if (hbm == IntPtr.Zero) return null;
+                using (Image img = Image.FromHbitmap(hbm))
+                {
+                    return new Bitmap(img);
+                }
+            }
+            catch { return null; }
+            finally { if (hbm != IntPtr.Zero) DeleteObject(hbm); }
+        }
+    }
+
+    static class Wallpaper
+    {
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+
+        public static bool Set(string path)
+        {
+            // SPI_SETDESKWALLPAPER, persisted + broadcast.
+            return SystemParametersInfo(20, 0, path, 0x01 | 0x02);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // The explanation window's data: one entry per archived day,
+    // rebuilt from the archive folder itself (the .txt sidecars are
+    // the record — the same files the Mac app pages through).
+    // ------------------------------------------------------------------
+
+    class ArchiveDay
+    {
+        public string Date;
+        public string Title = "";
+        public string Credit = "";
+        public string Explanation = "";
+        public string ImagePath;
+        public string VideoPath;
+        public string MediaUrl = "";
+    }
+
+    static class ArchiveScan
+    {
+        public static List<ArchiveDay> Scan(string dir)
+        {
+            var map = new Dictionary<string, ArchiveDay>();
+            if (dir != null && Directory.Exists(dir))
+            {
+                foreach (string f in Directory.GetFiles(dir))
+                {
+                    string name = Path.GetFileName(f);
+                    var m = Regex.Match(name, "^(\\d{4}-\\d{2}-\\d{2})");
+                    if (!m.Success) continue;
+                    string date = m.Groups[1].Value;
+                    ArchiveDay day;
+                    if (!map.TryGetValue(date, out day))
+                    {
+                        day = new ArchiveDay();
+                        day.Date = date;
+                        map[date] = day;
+                    }
+                    string ext = Path.GetExtension(f).ToLowerInvariant();
+                    if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") day.ImagePath = f;
+                    else if (ext == ".mp4") day.VideoPath = f;
+                    else if (ext == ".txt") ReadTxt(f, day);
+                }
+            }
+            var list = new List<ArchiveDay>(map.Values);
+            list.Sort(delegate(ArchiveDay a, ArchiveDay b)
+            {
+                return string.Compare(a.Date, b.Date, StringComparison.Ordinal);
+            });
+            return list;
+        }
+
+        private static void ReadTxt(string path, ArchiveDay day)
+        {
+            try
+            {
+                string[] lines = File.ReadAllLines(path, Encoding.UTF8);
+                if (lines.Length > 0) day.Title = lines[0];
+                var expl = new List<string>();
+                bool inExpl = false;
+                foreach (string ln in lines)
+                {
+                    if (ln.StartsWith("Image: ", StringComparison.Ordinal)
+                        || ln.StartsWith("Video: ", StringComparison.Ordinal))
+                    {
+                        int c = ln.IndexOf(':');
+                        if (c >= 0) day.MediaUrl = ln.Substring(c + 2);
+                        inExpl = false;
+                        continue;
+                    }
+                    if (ln.StartsWith("APOD: ", StringComparison.Ordinal)) { inExpl = false; continue; }
+                    if (inExpl) { expl.Add(ln); continue; }
+                    if (ln == "Explanation:") inExpl = true;
+                }
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    if (lines[i].StartsWith("Date: ", StringComparison.Ordinal))
+                    {
+                        if (i + 1 < lines.Length && lines[i + 1].Length > 0 && lines[i + 1] != "Explanation:")
+                            day.Credit = lines[i + 1];
+                        break;
+                    }
+                }
+                while (expl.Count > 0 && expl[expl.Count - 1].Length == 0) expl.RemoveAt(expl.Count - 1);
+                day.Explanation = string.Join("\n", expl.ToArray());
+            }
+            catch { }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Explanation window: the day's picture (or a video's first
+    // frame) with its title, date, credit and full explanation, and
+    // prev/next paging through the local archive — the Mac app's
+    // detail window, Windows-style.
+    // ------------------------------------------------------------------
+
+    class ExplanationForm : Form
+    {
+        private List<ArchiveDay> days;
+        private int index;
+        private PictureBox pic;
+        private Label titleLabel;
+        private Label metaLabel;
+        private TextBox explBox;
+        private Button prevBtn;
+        private Button nextBtn;
+        private Button playBtn;
+        private Button wallBtn;
+        private Image shownImage;
+
+        public ExplanationForm(List<ArchiveDay> days, string startDate)
+        {
+            this.days = days;
+            index = days.Count - 1;
+            if (startDate != null)
+            {
+                for (int i = 0; i < days.Count; i++)
+                    if (days[i].Date == startDate) { index = i; break; }
+            }
+
+            Text = "NASA APOD";
+            StartPosition = FormStartPosition.CenterScreen;
+            ClientSize = new Size(780, 860);
+            Font = new Font("Microsoft YaHei UI", 9f);
+            FormClosed += delegate { SetImage(null); };
+
+            pic = new PictureBox();
+            pic.Location = new Point(12, 12);
+            pic.Size = new Size(756, 430);
+            pic.SizeMode = PictureBoxSizeMode.Zoom;
+            pic.BackColor = Color.Black;
+            pic.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(pic);
+
+            titleLabel = new Label();
+            titleLabel.Location = new Point(12, 452);
+            titleLabel.Size = new Size(756, 28);
+            titleLabel.Font = new Font("Microsoft YaHei UI", 13f, FontStyle.Bold);
+            titleLabel.AutoEllipsis = true;
+            titleLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(titleLabel);
+
+            metaLabel = new Label();
+            metaLabel.Location = new Point(12, 484);
+            metaLabel.Size = new Size(756, 22);
+            metaLabel.ForeColor = Color.FromArgb(110, 110, 115);
+            metaLabel.AutoEllipsis = true;
+            metaLabel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(metaLabel);
+
+            explBox = new TextBox();
+            explBox.Location = new Point(12, 512);
+            explBox.Size = new Size(756, 292);
+            explBox.Multiline = true;
+            explBox.ReadOnly = true;
+            explBox.ScrollBars = ScrollBars.Vertical;
+            explBox.Font = new Font("Microsoft YaHei UI", 10f);
+            explBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            Controls.Add(explBox);
+
+            prevBtn = new Button();
+            prevBtn.Text = S.MPrevDay;
+            prevBtn.Location = new Point(12, 816);
+            prevBtn.Size = new Size(110, 30);
+            prevBtn.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            prevBtn.Click += delegate { if (index > 0) { index--; ShowDay(); } };
+            Controls.Add(prevBtn);
+
+            nextBtn = new Button();
+            nextBtn.Text = S.MNextDay;
+            nextBtn.Location = new Point(130, 816);
+            nextBtn.Size = new Size(110, 30);
+            nextBtn.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            nextBtn.Click += delegate { if (index < days.Count - 1) { index++; ShowDay(); } };
+            Controls.Add(nextBtn);
+
+            playBtn = new Button();
+            playBtn.Text = S.MPlayVideo;
+            playBtn.Location = new Point(360, 816);
+            playBtn.Size = new Size(110, 30);
+            playBtn.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            playBtn.Click += delegate
+            {
+                ArchiveDay d = days[index];
+                if (d.VideoPath != null && File.Exists(d.VideoPath)) Process.Start(d.VideoPath);
+                else if (d.MediaUrl.Length > 0) Process.Start(d.MediaUrl);
+            };
+            Controls.Add(playBtn);
+
+            wallBtn = new Button();
+            wallBtn.Text = S.MWallpaper;
+            wallBtn.Location = new Point(478, 816);
+            wallBtn.Size = new Size(110, 30);
+            wallBtn.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
+            wallBtn.Click += delegate
+            {
+                ArchiveDay d = days[index];
+                if (d.ImagePath != null && File.Exists(d.ImagePath))
+                {
+                    if (Wallpaper.Set(d.ImagePath)) TimedMessage.Show(S.WallpaperSet);
+                }
+            };
+            Controls.Add(wallBtn);
+
+            var closeBtn = new Button();
+            closeBtn.Text = S.MClose;
+            closeBtn.Location = new Point(658, 816);
+            closeBtn.Size = new Size(110, 30);
+            closeBtn.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            closeBtn.Click += delegate { Close(); };
+            Controls.Add(closeBtn);
+
+            ShowDay();
+        }
+
+        private void SetImage(Image img)
+        {
+            Image old = shownImage;
+            shownImage = img;
+            pic.Image = img;
+            if (old != null) old.Dispose();
+        }
+
+        private void ShowDay()
+        {
+            ArchiveDay d = days[index];
+            titleLabel.Text = d.Title;
+            string meta = d.Date;
+            if (d.Credit.Length > 0) meta += "  ·  " + d.Credit;
+            if (d.VideoPath != null || (d.ImagePath == null && d.MediaUrl.Length > 0)) meta += "  ·  " + S.MVideoNote;
+            metaLabel.Text = meta;
+            explBox.Text = d.Explanation;
+            explBox.SelectionStart = 0;
+            explBox.ScrollToCaret();
+            prevBtn.Enabled = index > 0;
+            nextBtn.Enabled = index < days.Count - 1;
+            playBtn.Visible = d.VideoPath != null || (d.ImagePath == null && d.MediaUrl.Length > 0);
+            wallBtn.Enabled = d.ImagePath != null && File.Exists(d.ImagePath);
+            Image img = null;
+            try
+            {
+                if (d.ImagePath != null && File.Exists(d.ImagePath))
+                {
+                    using (var ms = new MemoryStream(File.ReadAllBytes(d.ImagePath)))
+                    using (var raw = Image.FromStream(ms))
+                    {
+                        img = Core.TrimBlackBorders(new Bitmap(raw));
+                    }
+                }
+                else if (d.VideoPath != null && File.Exists(d.VideoPath))
+                {
+                    Image frame = ShellThumb.GetImage(d.VideoPath, 900);
+                    if (frame != null)
+                    {
+                        img = Core.TrimBlackBorders(new Bitmap(frame));
+                        frame.Dispose();
+                    }
+                }
+            }
+            catch (Exception ex) { Core.Log("Explanation image failed: " + ex.Message); }
+            SetImage(img);
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Tray application: the telescope in the tray. Left-click toggles
     // the preview popup; the menu mirrors the plugin's dropdown —
     // title (clickable), Refresh with its answer, the Archive submenu,
@@ -1084,6 +1788,7 @@ namespace NasaApod
         private NotifyIcon tray;
         private ToolStripMenuItem titleItem;
         private ToolStripMenuItem updateItem;
+        private ToolStripMenuItem wallpaperItem;
         private System.Windows.Forms.Timer hoverTimer;
         private System.Windows.Forms.Timer hoverWatchdog;
         private DateTime lastTrayMove = DateTime.MinValue;
@@ -1145,6 +1850,14 @@ namespace NasaApod
             var siteItem = new ToolStripMenuItem(S.MOpenSite);
             siteItem.Click += delegate { Process.Start(Core.PageUrl); };
             menu.Items.Add(siteItem);
+
+            var explanationItem = new ToolStripMenuItem(S.MExplanation);
+            explanationItem.Click += delegate { ShowExplanation(); };
+            menu.Items.Add(explanationItem);
+
+            wallpaperItem = new ToolStripMenuItem(S.MWallpaper);
+            wallpaperItem.Click += delegate { SetWallpaperCurrent(); };
+            menu.Items.Add(wallpaperItem);
 
             menu.Items.Add(new ToolStripSeparator());
 
@@ -1296,6 +2009,64 @@ namespace NasaApod
                 string trayText = "NASA APOD - " + current.Info.Title;
                 if (trayText.Length >= 64) trayText = trayText.Substring(0, 63);
                 tray.Text = trayText;
+                // The Mac version's menu carries a thumbnail of the
+                // day; the tray menu's title item carries one too.
+                if (current.DisplayImage != null)
+                {
+                    try
+                    {
+                        int w = 56;
+                        int h = Math.Max(16, (int)(w * (double)current.DisplayImage.Height / current.DisplayImage.Width));
+                        if (h > 42) { h = 42; w = Math.Max(16, (int)(h * (double)current.DisplayImage.Width / current.DisplayImage.Height)); }
+                        Image old = titleItem.Image;
+                        titleItem.Image = new Bitmap(current.DisplayImage, new Size(w, h));
+                        if (old != null) old.Dispose();
+                    }
+                    catch { }
+                }
+                if (wallpaperItem != null)
+                {
+                    wallpaperItem.Enabled = !current.Info.IsVideo
+                        && !string.IsNullOrEmpty(current.ArchivePath)
+                        && File.Exists(current.ArchivePath);
+                }
+            }
+        }
+
+        private void ShowExplanation()
+        {
+            var days = ArchiveScan.Scan(Settings.EffectiveDir());
+            if (days.Count == 0)
+            {
+                if (current != null && current.Info != null)
+                {
+                    var d = new ArchiveDay();
+                    d.Date = current.Info.Date;
+                    d.Title = current.Info.Title;
+                    d.Credit = current.Info.Credit;
+                    d.Explanation = current.Info.Explanation;
+                    d.ImagePath = current.Info.IsVideo ? null : current.ArchivePath;
+                    d.VideoPath = current.VideoPath;
+                    d.MediaUrl = current.Info.IsVideo ? current.Info.VideoUrl : (current.Info.ArchiveUrl ?? "");
+                    days.Add(d);
+                }
+                else
+                {
+                    TimedMessage.Show(S.NoImageYet);
+                    return;
+                }
+            }
+            string start = current != null && current.Info != null ? current.Info.Date : null;
+            using (var f = new ExplanationForm(days, start)) f.ShowDialog();
+        }
+
+        private void SetWallpaperCurrent()
+        {
+            if (current != null && current.Info != null && !current.Info.IsVideo
+                && !string.IsNullOrEmpty(current.ArchivePath) && File.Exists(current.ArchivePath))
+            {
+                if (Wallpaper.Set(current.ArchivePath)) TimedMessage.Show(S.WallpaperSet);
+                else TimedMessage.Show(S.Error);
             }
         }
 
