@@ -1,3 +1,7 @@
+> **This repository has moved / 本仓库已迁移** — development continues in [**NASA-APOD**](https://github.com/iam-otakun/NASA-APOD), where the macOS and Windows editions live together from v2.0.0 on. This repository is archived and kept for history only. / 后续开发已转到 [NASA-APOD](https://github.com/iam-otakun/NASA-APOD)：macOS 与 Windows 两端自 v2.0.0 起同住一个仓库。本仓库已归档，仅作历史留存。
+
+---
+
 # NASA APOD for Windows / NASA 每日天文图（Windows 版）
 
 A Windows system-tray app that shows the [NASA Astronomy Picture of the Day (APOD)](https://apod.nasa.gov/apod/) by your clock — and quietly archives the original picture to your Pictures folder every day. It is the Windows sibling of [swiftbar-nasa-apod](https://github.com/iam-otakun/swiftbar-nasa-apod), and mirrors it feature for feature.
